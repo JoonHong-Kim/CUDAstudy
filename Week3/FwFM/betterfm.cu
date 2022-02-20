@@ -7,20 +7,27 @@
 #define INPUT_CNT 1024
 #define TILE_SIZE 16
 
-__global__ void TileFM(float *result, float *feature, int *input_data, float *interaction_weight)
+__global__ void betterFM(float *result, float *feature, int *input_data, float *interaction_weight)
 {
+    __shared__ int s_A[INPUT_CNT];
     int data_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    __shared__ float s_A[TILE_SIZE][TILE_SIZE];
-    __shared__ float s_B[TILE_SIZE][TILE_SIZE];
-    // only consider second order interaction.
+    s_A[data_idx] = input_data[data_idx * N_FIELD + 15];
+    // __syncthreads();
     float res = 0;
-    for (int i = 0; i < N_FIELD; i++)
+    int didx=0;
+    int djdx =0;
+    for (int i = 0; i < TILE_SIZE; i++)
     {
-        for (int j = i + 1; j < N_FIELD; j++)
+        for (int j = i + 1; j < TILE_SIZE; j++)
         {
-            int didx = input_data[data_idx * N_FIELD + i];
-            int djdx = input_data[data_idx * N_FIELD + j];
-
+            didx = input_data[data_idx * TILE_SIZE + i];
+            if (j == TILE_SIZE - 1)
+            {
+                djdx = s_A[data_idx];
+            }
+            else{
+                djdx = input_data[data_idx * TILE_SIZE + j];
+            }
             float sum = 0;
             for (int k = 0; k < DIM_FEAT; k++)
             {
@@ -31,7 +38,6 @@ __global__ void TileFM(float *result, float *feature, int *input_data, float *in
     }
     result[data_idx] = res;
 }
-
 float rand_float()
 {
     return (float)rand() / (float)RAND_MAX;
@@ -83,17 +89,28 @@ int main()
     }
 
     cudaMallocManaged(&result, INPUT_CNT * sizeof(float));
-
+    dim3 block(16);
+    dim3 grid(ceil(N_FEATURE / block.x));
     // run, measure time
     float start = clock();
     for (int i = 0; i < 10000; i++)
     {
-        NaiveFM<<<1, INPUT_CNT>>>(result, feature, input_data, interaction_weight);
+        betterFM<<<grid, block>>>(result, feature, input_data, interaction_weight);
         cudaDeviceSynchronize();
     }
     float end = clock();
     float time = (end - start) / CLOCKS_PER_SEC;
-
+    // dim3 block(16, 1024);
+    // dim3 grid(ceil(INPUT_CNT / block.x));
+    // // run, measure time
+    // float start = clock();
+    // for (int i = 0; i < 1; i++)
+    // {
+    //     betterFM<<<grid, block>>>(result, feature, input_data, interaction_weight);
+    //     cudaDeviceSynchronize();
+    // }
+    // float end = clock();
+    // float time = (end - start) / CLOCKS_PER_SEC;
     printf("time: %f\n", time);
 
     // check result
